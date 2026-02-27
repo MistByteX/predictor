@@ -1,69 +1,68 @@
-# 预测系统规范
+# 预测系统规范 (v0.2.0)
 
 ## 项目概述
 - **项目名称**: Future Predictor
 - **类型**: 命令行工具 + Python库
-- **核心功能**: 基于模板和GLM AI API进行未来走向预测
+- **核心功能**: 基于GLM AI的通用预测系统，支持梅花易数和多Agent模拟
 - **目标用户**: 需要对未来事件进行分析预测的用户
+
+## 核心目标
+**无论给什么事件都能准确预测 - 统一模板系统**
 
 ## 功能规范
 
-### 核心功能
+### 1. 统一模板系统
+- 只有一套通用模板 `universal.md`
+- 适用于任何类型事件的预测
+- 变量可自由定义
 
-1. **模板管理**
-   - 支持创建、编辑、删除预测模板
-   - 模板格式为Markdown
-   - 支持变量占位符 `{variable_name}`
-   - 模板存储在 `templates/` 目录
+### 2. 梅花易数集成（可选）
+- 通过 `--meihua` 或 `-m` 开启
+- 自动调用梅花易数算法
+- 结果自动附加到预测输出中
 
-2. **变量填充**
-   - 运行时指定变量值
-   - 支持JSON格式批量输入变量
+### 3. 多Agent模拟（可选）
+- 通过 `--agents` 或 `-a` 指定Agent数量
+- 每个Agent独立分析事件发展
+- 模拟不同视角下的事件演进
 
-3. **预测执行**
-   - 调用GLM API生成预测
-   - 支持自定义系统提示词
-   - 返回Markdown格式预测结果
+### 4. 直接提问模式
+```bash
+# 简单预测
+predictor ask "明天天气怎么样"
 
-4. **历史记录**
-   - 保存预测历史到 `predictions/` 目录
-   - 可查看历史预测
+# 启用梅花易数
+predictor ask "我的事业发展如何" -m
+
+# 启用多Agent模拟
+predictor ask "这个项目能成功吗" -a 3
+
+# 同时启用
+predictor ask "这笔投资能赚钱吗" -m -a 3
+```
+
+### 5. 模板预测模式
+```bash
+# 使用模板预测
+predictor predict universal -v '{"事件描述": "...", "时间": "..."}' -m -a 2
+```
 
 ### CLI命令
 
 ```bash
-# 初始化项目
+# 初始化
 predictor init
 
-# 创建模板
-predictor create-template <name> -t <template_file.md>
+# 直接提问（推荐）
+predictor ask <事件描述> [选项]
 
-# 列出模板
+# 梅花易数单独预测
+predictor yi <问题>
+
+# 其他命令
 predictor list-templates
-
-# 执行预测
-predictor predict <template_name> -v '{"var1": "value1", "var2": "value2"}'
-
-# 查看历史
 predictor history
-
-# 查看版本
-predictor version
-```
-
-### API设计
-
-```python
-from predictor import Predictor
-
-# 初始化
-p = Predictor(glm_api_key="your-key", glm_base_url="https://open.bigmodel.cn/api/paas/v4")
-
-# 创建模板
-p.create_template("stock_trend", "股票走势预测模板.md")
-
-# 执行预测
-result = p.predict("stock_trend", variables={"股票代码": "600519", "时间范围": "一个月"})
+predictor algo -d "1,2,3,4,5"
 ```
 
 ## 技术实现
@@ -75,8 +74,7 @@ result = p.predict("stock_trend", variables={"股票代码": "600519", "时间�
 
 ## 验收标准
 
-1. ✅ 可创建Markdown模板
-2. ✅ 支持变量替换
-3. ✅ 调用GLM API返回预测结果
-4. ✅ 保存预测历史
-5. ✅ CLI工具完整可用
+1. ✅ 统一模板适用任何事件
+2. ✅ 梅花易数自动集成
+3. ✅ 多Agent模拟支持
+4. ✅ CLI工具完整可用

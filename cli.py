@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-预测系统CLI工具
+预测系统CLI工具 - 支持梅花易数和多Agent模拟
 """
 import sys
 import os
@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 import requests
 from algorithms import ALGORITHMS, EnsemblePredictor
-from meihua import predict, format_result
+from meihua import predict as meihua_predict, format_result as format_meihua
 
 # 配置路径
 CONFIG_DIR = Path.home() / ".predictor"
@@ -19,7 +19,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 PREDICTIONS_DIR = Path(__file__).parent / "predictions"
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 def get_config() -> dict:
@@ -98,13 +98,49 @@ class Predictor:
         with open(template_path, encoding="utf-8") as f:
             return f.read()
     
-    def predict(self, template_name: str, variables: dict = None, system_prompt: str = None) -> dict:
+    def predict(self, template_name: str, variables: dict = None, system_prompt: str = None,
+                enable_meihua: bool = False, simulate_agents: int = 0) -> dict:
         template = self.get_template(template_name)
         if variables:
             prompt = fill_template(template, variables)
         else:
             prompt = template
         
+        # 梅花易数分析
+        meihua_result = None
+        if enable_meihua:
+            question = variables.get("事件描述", variables.get("事件", "")) if variables else prompt
+            try:
+                now = datetime.now()
+                meihua_result = meihua_predict(
+                    question, 
+                    method="time",
+                    year=now.year,
+                    month=now.month,
+                    day=now.day,
+                    hour=now.hour
+                )
+            except Exception as e:
+                meihua_result = {"error": str(e)}
+        
+        # 多Agent模拟
+        agent_simulations = []
+        if simulate_agents > 0:
+            for i in range(simulate_agents):
+                agent_prompt = f"你是模拟Agent {i+1}，请从你的角度分析这个事件的发展：\n\n{prompt}"
+                try:
+                    sim_result = self.call_glm(agent_prompt, system_prompt="你是一个专业的未来学家，擅长分析事件发展趋势")
+                    agent_simulations.append({
+                        "agent_id": i + 1,
+                        "analysis": sim_result
+                    })
+                except Exception as e:
+                    agent_simulations.append({
+                        "agent_id": i + 1,
+                        "error": str(e)
+                    })
+        
+        # 主预测
         prediction = self.call_glm(prompt, system_prompt)
         
         PREDICTIONS_DIR.mkdir(parents=True, exist_ok=True)
@@ -114,6 +150,8 @@ class Predictor:
             "variables": variables or {},
             "prompt": prompt,
             "prediction": prediction,
+            "meihua": meihua_result,
+            "agent_simulations": agent_simulations,
             "timestamp": timestamp
         }
         
@@ -124,6 +162,8 @@ class Predictor:
         return {
             "prompt": prompt,
             "prediction": prediction,
+            "meihua": meihua_result,
+            "agent_simulations": agent_simulations,
             "history_file": str(history_file)
         }
     
@@ -140,6 +180,39 @@ class Predictor:
                     "prediction": data["prediction"][:100] + "..."
                 })
         return records
+
+
+def format_output(result: dict, enable_meihua: bool = False, simulate_agents: int = 0) -> str:
+    """格式化输出结果"""
+    output = []
+    output.append("\n" + "="*60)
+    output.append("📊 预测结果")
+    output.append("="*60)
+    output.append(result["prediction"])
+    
+    # 梅花易数结果
+    if enable_meihua and result.get("meihua"):
+        meihua = result["meihua"]
+        if "error" not in meihua:
+            output.append("\n" + "="*60)
+            output.append("🔮 梅花易数分析")
+            output.append("="*60)
+            output.append(format_meihua(meihua))
+    
+    # 多Agent模拟结果
+    if simulate_agents > 0 and result.get("agent_simulations"):
+        output.append("\n" + "="*60)
+        output.append(f"🤖 多Agent模拟 ({simulate_agents}个Agent)")
+        output.append("="*60)
+        for sim in result["agent_simulations"]:
+            if "error" not in sim:
+                output.append(f"\n--- Agent {sim['agent_id']} 分析 ---")
+                output.append(sim["analysis"][:500] + "..." if len(sim["analysis"]) > 500 else sim["analysis"])
+    
+    output.append("="*60)
+    output.append(f"\n📁 已保存至: {result['history_file']}")
+    
+    return "\n".join(output)
 
 
 def cmd_init(args):
@@ -216,36 +289,60 @@ def cmd_predict(args):
         if args.variables:
             variables = json.loads(args.variables)
         
+        enable_meihua = args.meihua
+        simulate_agents = args.agents
+        
         # 多次预测
         if args.times > 1:
             print(f"\n🔄 开始{args.times}次预测取平均...")
             predictions = []
             for i in range(args.times):
                 print(f"  [{i+1}/{args.times}] ", end="", flush=True)
-                result = p.predict(args.template, variables=variables)
+                result = p.predict(args.template, variables=variables, enable_meihua=enable_meihua, simulate_agents=simulate_agents)
                 predictions.append(result["prediction"])
                 print("✓")
             
             # 合并结果
-            print("\n" + "="*50)
+            print("\n" + "="*60)
             print(f"📊 预测结果（{args.times}次综合）:")
-            print("="*50)
+            print("="*60)
             for i, pred in enumerate(predictions, 1):
                 print(f"\n--- 第{i}次预测 ---\n{pred[:300]}...")
-            print("="*50)
+            print("="*60)
             print(f"\n📁 已保存{len(predictions)}条记录")
         else:
-            result = p.predict(args.template, variables=variables)
-            print("\n" + "="*50)
-            print("📊 预测结果:")
-            print("="*50)
-            print(result["prediction"])
-            print("="*50)
-            print(f"📁 已保存至: {result['history_file']}")
+            result = p.predict(args.template, variables=variables, enable_meihua=enable_meihua, simulate_agents=simulate_agents)
+            print(format_output(result, enable_meihua=enable_meihua, simulate_agents=simulate_agents))
             
     except json.JSONDecodeError as e:
         print(f"❌ JSON解析错误: {e}")
         sys.exit(1)
+    except Exception as e:
+        print(f"❌ 错误: {e}")
+        sys.exit(1)
+    return 0
+
+
+def cmd_simple_predict(args):
+    """简化的通用预测命令 - 无需模板"""
+    try:
+        p = Predictor(glm_api_key=args.api_key)
+        event = args.event
+        enable_meihua = args.meihua
+        simulate_agents = args.agents
+        
+        # 构建通用提示
+        variables = {
+            "事件描述": event,
+            "时间": args.time or "近期",
+            "地点": args.location or "不限",
+            "涉及人物": args.persons or "待定",
+            "当前状态": args.status or "进行中"
+        }
+        
+        result = p.predict("universal", variables=variables, enable_meihua=enable_meihua, simulate_agents=simulate_agents)
+        print(format_output(result, enable_meihua=enable_meihua, simulate_agents=simulate_agents))
+            
     except Exception as e:
         print(f"❌ 错误: {e}")
         sys.exit(1)
@@ -283,17 +380,15 @@ def cmd_template(args):
 def cmd_algo_predict(args):
     """算法预测"""
     try:
-        # 解析数据
         data = [float(x.strip()) for x in args.data.split(",")]
         
-        # 获取算法
         if args.algorithm == "ensemble":
             predictor = EnsemblePredictor()
             result = predictor.predict(data, steps=args.steps)
             
-            print("\n" + "="*50)
+            print("\n" + "="*60)
             print("📊 算法预测结果:")
-            print("="*50)
+            print("="*60)
             
             print(f"\n🔍 趋势分析:")
             trend = result["trend"]
@@ -309,7 +404,7 @@ def cmd_algo_predict(args):
                     print(f"  {name}: {pred:.2f}")
             
             print(f"\n🎯 综合预测: {result['ensemble']}")
-            print("="*50)
+            print("="*60)
         else:
             if args.algorithm not in ALGORITHMS:
                 print(f"❌ 未知算法: {args.algorithm}")
@@ -318,11 +413,11 @@ def cmd_algo_predict(args):
             algo = ALGORITHMS[args.algorithm]()
             pred = algo.predict(data, steps=args.steps)
             
-            print("\n" + "="*50)
+            print("\n" + "="*60)
             print(f"📊 {args.algorithm} 预测结果:")
-            print("="*50)
+            print("="*60)
             print(f"预测值: {pred}")
-            print("="*50)
+            print("="*60)
             
     except Exception as e:
         print(f"❌ 错误: {e}")
@@ -346,8 +441,8 @@ def cmd_yi_predict(args):
                 sys.exit(1)
             kwargs["direction"] = args.direction
         
-        result = predict(args.question, method=args.method, **kwargs)
-        print(format_result(result))
+        result = meihua_predict(args.question, method=args.method, **kwargs)
+        print(format_meihua(result))
         
     except Exception as e:
         print(f"❌ 错误: {e}")
@@ -356,8 +451,8 @@ def cmd_yi_predict(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="predictor", description="未来预测系统")
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
+    parser = argparse.ArgumentParser(prog="predictor", description="未来预测系统 v0.2.0 - 支持梅花易数和多Agent模拟")
+    parser.add_argument("--version", action="version", version="%(prog)s 0.2.0")
     parser.add_argument("--api-key", dest="api_key", help="GLM API Key")
     
     subparsers = parser.add_subparsers(dest="command", help="命令")
@@ -386,10 +481,23 @@ def main():
     parser_tpl.add_argument("name", help="模板名称")
     parser_tpl.set_defaults(func=cmd_template)
     
+    # 通用预测命令
+    parser_ask = subparsers.add_parser("ask", help="直接提问预测（无需模板）")
+    parser_ask.add_argument("event", help="预测事件描述")
+    parser_ask.add_argument("-t", "--time", help="时间")
+    parser_ask.add_argument("-l", "--location", help="地点")
+    parser_ask.add_argument("-p", "--persons", help="涉及人物")
+    parser_ask.add_argument("-s", "--status", help="当前状态")
+    parser_ask.add_argument("-m", "--meihua", action="store_true", help="启用梅花易数分析")
+    parser_ask.add_argument("-a", "--agents", type=int, default=0, help="启用多Agent模拟数量")
+    parser_ask.set_defaults(func=cmd_simple_predict)
+    
     parser_pred = subparsers.add_parser("predict", help="执行预测")
     parser_pred.add_argument("template", help="模板名称")
     parser_pred.add_argument("-v", "--variables", help="JSON格式变量")
     parser_pred.add_argument("-n", "--times", type=int, default=1, help="预测次数（取平均）")
+    parser_pred.add_argument("-m", "--meihua", action="store_true", help="启用梅花易数分析")
+    parser_pred.add_argument("-a", "--agents", type=int, default=0, help="启用多Agent模拟数量")
     parser_pred.set_defaults(func=cmd_predict)
     
     parser_hist = subparsers.add_parser("history", help="查看历史")
